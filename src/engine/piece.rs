@@ -1,6 +1,7 @@
-use cgmath::Zero;
-use super::{Coordinate, Offset, Board};
+use cgmath::{EuclideanSpace, Zero};
+use super::{Coordinate, Offset, Matrix, Color};
 
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) struct Piece {
     pub kind: Kind,
     pub position: Offset,
@@ -10,20 +11,26 @@ pub(super) struct Piece {
 impl Piece {
     const CELL_COUNT: usize = 4;
 
+    pub fn moved_by(&self, offset: Offset) -> Self {
+        Self {
+            position: self.position + offset,
+            ..*self
+        }
+    }
+
     pub fn cells(&self) -> Option<[Coordinate;Self::CELL_COUNT]> {
-        let offsets = self.kind.cells()
-            .map(self.rotator())
+        let offsets = dbg!(self.kind.cells()
+            .map(self.rotator()))
             .map(self.positioner());
 
-        let mut coords = [Coordinate::zero();Self::CELL_COUNT];
-        for (Offset { x, y }, coord) in offsets.into_iter().zip(&mut coords) {
-            let new = match (x.try_into(), y.try_into()) {
-                (Ok(x), Ok(y)) => Coordinate { x, y },
-                _ => return None,
-            };
+        let mut coords = [Coordinate::origin();Self::CELL_COUNT];
 
-            if Board::in_bounds(new) {
-                *coord = new;
+        for (offset, coord_slot) in offsets.into_iter().zip(&mut coords) {
+            let positive_offset = offset.cast::<usize>()?;
+            let coord = Coordinate::from_vec(positive_offset);
+
+            if Matrix::valid_coord(coord) {
+                *coord_slot = coord;
             } else {
                 return None;
             }
@@ -32,9 +39,14 @@ impl Piece {
         Some(coords)
     }
 
-    fn rotator(&self) -> impl Fn(Offset) -> Offset {
-        let rotation = self.rotation;
-        move |cell| cell * rotation
+    fn rotator(&self) -> impl Fn(Offset) -> Offset + '_ {
+        |cell| match self.kind {
+            Kind::O => cell,
+            _ => {
+                let grid_offset = self.rotation.intrinsic_offset() * (self.kind.grid_size() - 1);
+                cell * self.rotation + grid_offset
+            }
+        }
     }
 
     fn positioner(&self) -> impl Fn(Offset) -> Offset {
@@ -51,19 +63,49 @@ impl Kind {
 
     fn cells(&self) -> [Offset;Piece::CELL_COUNT] {
         match self {
-            Kind::O => &[( 0,0), ( 0,1), (1,0), (1,1)],
-            Kind::I => &[(-1,0), ( 0,0), (1,0), (2,0)],
-            Kind::T => &[(-1,0), ( 0,0), (1,0), (0,1)],
-            Kind::L => &[(-1,0), ( 0,0), (1,0), (1,1)],
-            Kind::J => &[(-1,1), (-1,0), (0,0), (1,0)],
-            Kind::S => &[(-1,0), ( 0,0), (0,1), (1,1)],
-            Kind::Z => &[(-1,1), ( 0,1), (0,0), (1,0)],
+            Self::O => &[( 1,1), ( 1,2), (2,1), (2,2)],
+            Self::I => &[( 0,2), ( 1,2), (2,2), (3,2)],
+            Self::T => &[( 0,1), ( 1,1), (2,1), (1,2)],
+            Self::L => &[( 0,1), ( 1,1), (2,1), (2,2)],
+            Self::J => &[( 0,2), ( 0,1), (1,1), (2,1)],
+            Self::S => &[( 1,1), ( 1,1), (1,2), (2,2)],
+            Self::Z => &[( 0,2), ( 1,2), (1,1), (2,1)],
         }.map(Offset::from)
+    }
+
+    fn grid_size(&self) -> isize {
+        match self {
+            Self::I => 4,
+            _ => 3,
+        }
+    }
+
+    pub fn color(&self) -> Color {
+        match self {
+            Self::O => Color::Yellow,
+            Self::I => Color::Cyan,
+            Self::T => Color::Purple,
+            Self::L => Color::Orange,
+            Self::J => Color::Blue,
+            Self::S => Color::Green,
+            Self::Z => Color::Red,
+        }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Rotation { N, E, S, W }
+
+impl Rotation {
+    fn intrinsic_offset(&self) -> Offset {
+        match self {
+            Self::N => Offset::zero(),
+            Self::E => Offset::new(0, 1),
+            Self::S => Offset::new(1, 1),
+            Self::W => Offset::new(1, 0),
+        }
+    }
+}
 
 impl std::ops::Mul<Rotation> for Offset {
     type Output = Self;
@@ -71,9 +113,9 @@ impl std::ops::Mul<Rotation> for Offset {
     fn mul(self, rotation: Rotation) -> Self::Output {
         match rotation {
             Rotation::N => self,
-            Rotation::E => Offset::new(self.y, -self.x),
-            Rotation::S => Offset::new(-self.x, -self.y),
-            Rotation::W => Offset::new(-self.y, self.x),
+            Rotation::E => Self::new( self.y, -self.x),
+            Rotation::S => Self::new(-self.x, -self.y),
+            Rotation::W => Self::new(-self.y,  self.x),
         }
     }
 }
@@ -92,7 +134,7 @@ mod test {
 
         assert_eq!(
             z.cells(),
-            Some([(4, 5), (4, 6), (5, 6), (5, 7)].map(Coordinate::from))
+            Some([(5, 6), (5, 7), (6, 7), (6, 8)].map(Coordinate::from))
         );
     }
 }
