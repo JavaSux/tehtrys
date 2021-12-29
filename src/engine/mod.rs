@@ -1,9 +1,9 @@
-use std::ops::{Index, IndexMut};
+use std::{ops::{Index, IndexMut}, time::Duration};
 use cgmath::EuclideanSpace;
 use rand::{prelude::{SliceRandom, ThreadRng}, thread_rng};
-use self::{piece::{Piece, Kind as PieceKind}, geometry::GridIncrement};
+use self::{piece::{Piece, Kind as PieceKind, Rotation}, geometry::GridIncrement};
 
-mod piece;
+pub mod piece;
 mod geometry;
 
 type Coordinate = cgmath::Point2<usize>;
@@ -26,6 +26,7 @@ pub struct Engine {
     bag: Vec<PieceKind>,
     rng: ThreadRng,
     cursor: Option<Piece>,
+    level: u8,
 }
 
 impl Engine {
@@ -35,6 +36,7 @@ impl Engine {
             bag: Vec::new(),
             rng: thread_rng(),
             cursor: None,
+            level: 1,
         }
     }
 
@@ -66,7 +68,7 @@ impl Engine {
         }
     }
 
-    fn move_cursor(&mut self, kind: MoveKind) -> Result<(), ()> {
+    pub fn move_cursor(&mut self, kind: MoveKind) -> Result<(), ()> {
         let Some(cursor) = self.cursor.as_mut() else {
             return Ok(());
         };
@@ -77,7 +79,21 @@ impl Engine {
             return Err(());
         }
 
-        Ok(self.cursor = Some(new))
+        self.cursor = Some(new);
+        Ok(())
+    }
+
+    pub fn cursor_info(&self) -> Option<([Coordinate;Piece::CELL_COUNT], Color)> {
+        let cursor = self.cursor?;
+        Some((
+            cursor.cells().unwrap(),
+            cursor.kind.color(),
+        ))
+    }
+
+    pub fn DEBUG_test_cursor(&mut self, kind: PieceKind, position: Offset) {
+        let piece = Piece { kind, rotation: Rotation::N, position };
+        self.cursor = Some(piece);
     }
 
     fn tick_down(&mut self) {
@@ -95,7 +111,7 @@ impl Engine {
         (!self.matrix.is_clipping(&new)).then_some(new)
     }
 
-    fn hard_drop(&mut self) {
+    pub fn hard_drop(&mut self) {
         while let Some(new) = self.ticked_down_cursor() {
             self.cursor = Some(new);
         }
@@ -107,6 +123,12 @@ impl Engine {
             position: Coordinate::origin(),
             cells: self.matrix.0.iter(),
         }
+    }
+
+    pub fn drop_time(&self) -> Duration {
+        let level_index = self.level - 1;
+        let seconds_per_line = (0.8 - (level_index as f32 * 0.007)).powi(level_index as _);
+        Duration::from_secs_f32(seconds_per_line)
     }
 }
 
@@ -175,17 +197,17 @@ pub struct CellIter<'matrix> {
 }
 
 impl<'matrix> Iterator for CellIter<'matrix> {
-    type Item = (Coordinate, &'matrix Option<Color>) ;
+    type Item = (Coordinate, Option<Color>) ;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(cell) = self.cells.next() else {
+        let Some(&cell) = self.cells.next() else {
             return None;
         };
 
         let coord = self.position;
         self.position.grid_inc();
 
-        return Some((coord, cell));
+        Some((coord, cell))
     }
 }
 
@@ -208,18 +230,18 @@ mod test {
         assert_eq!(
             first_five,
             [
-                (Coordinate::new(0, 0), &None),
-                (Coordinate::new(1, 0), &None),
-                (Coordinate::new(2, 0), &Some(Color::Blue)),
-                (Coordinate::new(3, 0), &None),
-                (Coordinate::new(4, 0), &None),
+                (Coordinate::new(0, 0), None),
+                (Coordinate::new(1, 0), None),
+                (Coordinate::new(2, 0), Some(Color::Blue)),
+                (Coordinate::new(3, 0), None),
+                (Coordinate::new(4, 0), None),
             ],
         );
 
         let other_item = (&mut iter).skip(8).next();
         assert_eq!(
             other_item,
-            Some((Coordinate::new(3, 1), &Some(Color::Green))),
+            Some((Coordinate::new(3, 1), Some(Color::Green))),
         );
 
         assert!(iter.all(|(_, contents)| contents.is_none()));

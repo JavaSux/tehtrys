@@ -9,7 +9,7 @@ pub(super) struct Piece {
 }
 
 impl Piece {
-    const CELL_COUNT: usize = 4;
+    pub const CELL_COUNT: usize = 4;
 
     pub fn moved_by(&self, offset: Offset) -> Self {
         Self {
@@ -19,8 +19,8 @@ impl Piece {
     }
 
     pub fn cells(&self) -> Option<[Coordinate;Self::CELL_COUNT]> {
-        let offsets = dbg!(self.kind.cells()
-            .map(self.rotator()))
+        let offsets = self.kind.cells()
+            .map(self.rotator())
             .map(self.positioner());
 
         let mut coords = [Coordinate::origin();Self::CELL_COUNT];
