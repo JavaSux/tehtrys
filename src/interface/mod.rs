@@ -1,12 +1,13 @@
 mod render_traits;
 mod sub_rect;
+mod sync_events;
 
-use std::time::Duration;
+use std::{time::Duration, sync::{Arc, Mutex}};
 
 use cgmath::{Vector2, ElementWise, EuclideanSpace, Point2};
 use sdl2::{event::Event, rect::Rect, render::Canvas, video::Window, pixels::Color, keyboard::Keycode};
 
-use crate::engine::{Engine, Matrix, Color as SemanticColor, MoveKind};
+use crate::{engine::{Engine, Matrix, Color as SemanticColor, MoveKind}, interface::sync_events::SyncEvents};
 
 use self::{render_traits::ScreenColor, sub_rect::{SubRect, Align}};
 
@@ -19,14 +20,16 @@ struct Tick;
 struct LockdownTick;
 struct SoftDropTick;
 
-struct Sleep(Duration);
-
 pub fn run(mut engine: Engine) {
     let sdl = sdl2::init().expect("Failed to initialize SDL2");
 
-    let event_subsystem = sdl.event().expect("Failed to acquire event subsystem");
+    let event_subsystem = SyncEvents::from(
+        sdl.event().expect("Failed to acquire event subsystem")
+    );
     event_subsystem.register_custom_event::<Tick>().unwrap();
     event_subsystem.register_custom_event::<LockdownTick>().unwrap();
+
+    // let timer_subsystem = sdl.timer().expect("Failed to acquire timer subsystem");
 
     let mut canvas = {
         let video = sdl.video().expect("Failed to acquire display");
@@ -49,9 +52,9 @@ pub fn run(mut engine: Engine) {
     let mut events = sdl.event_pump().expect("Failed to get event loop");
 
     event_subsystem.push_custom_event(Tick).unwrap();
-    event_subsystem.push_custom_event(LockdownTick).unwrap();
 
-    let mut dirty: bool = true;
+    let mut dirty = true;
+    let mut lock_down = false;
 
     loop {
         for event in events.poll_iter() {
@@ -64,12 +67,20 @@ pub fn run(mut engine: Engine) {
                 Event::User { .. } if event.as_user_event_type::<LockdownTick>().is_some() => {
                     println!("Found lockdown tick event");
                     dirty = true;
+                    lock_down = true;
+                }
+                Event::User { .. } if event.as_user_event_type::<SoftDropTick>().is_some() => {
+                    println!("Found soft drop tick event");
+                    dirty = true;
                 }
                 Event::KeyDown { keycode: Some(key), .. } => {
                     if let Ok(input) = Input::try_from(key) {
                         match input {
                             Input::Move(kind) => drop(engine.move_cursor(kind)),
-                            Input::HardDrop => engine.hard_drop(),
+                            Input::HardDrop => {
+                                engine.hard_drop();
+                                lock_down = true;
+                            }
                             Input::SoftDrop => todo!("Soft drop ticks"),
                         }
                         dirty = true;
@@ -77,6 +88,10 @@ pub fn run(mut engine: Engine) {
                 }
                 _ => {}
             }
+        }
+
+        if lock_down {
+            engine.line_clear(|_| ());
         }
 
         if dirty {

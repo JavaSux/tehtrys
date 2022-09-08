@@ -1,4 +1,4 @@
-use std::{ops::{Index, IndexMut}, time::Duration};
+use std::{ops::{Index, IndexMut, Range}, time::Duration, slice::ArrayChunks};
 use cgmath::EuclideanSpace;
 use rand::{prelude::{SliceRandom, ThreadRng}, thread_rng};
 use self::{piece::{Piece, Kind as PieceKind, Rotation}, geometry::GridIncrement};
@@ -130,6 +130,15 @@ impl Engine {
         let seconds_per_line = (0.8 - (level_index as f32 * 0.007)).powi(level_index as _);
         Duration::from_secs_f32(seconds_per_line)
     }
+
+    pub fn line_clear(
+        &mut self,
+        mut animation: impl FnMut(&[usize]),
+    ) {
+        let lines = self.matrix.full_lines();
+        animation(lines.as_slice());
+        self.matrix.clear_lines(lines.as_slice());
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -161,8 +170,8 @@ impl Matrix {
     fn is_clipping(&self, piece: &Piece) -> bool {
         let Some(cells) = piece.cells() else { return true; };
         cells.into_iter().any(|coord|
-            !Matrix::on_matrix(coord) ||
-            self[coord].is_some()
+            !Matrix::valid_coord(coord) ||
+            (Matrix::on_matrix(coord) && self[coord].is_some())
         )
     }
 
@@ -172,6 +181,29 @@ impl Matrix {
             Matrix::on_matrix(coord) &&
             self[coord].is_none()
         )
+    }
+
+    fn lines(&self) -> ArrayChunks<'_, Option<Color>, {Self::WIDTH}> {
+        self.0.array_chunks()
+    }
+
+    fn full_lines(&self) -> Vec<usize> {
+        self.lines()
+            .enumerate()
+            .filter(|(_, line)|
+                line.iter().all(Option::is_some)
+            )
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    fn clear_lines(&mut self, indices: &[usize]) {
+        debug_assert!(indices.is_sorted());
+        for index in indices.iter().rev() {
+            let start_of_remainder = Self::WIDTH * (index + 1);
+            self.0.copy_within(start_of_remainder.., (index * Self::WIDTH));
+            self.0[Self::SIZE - Self::WIDTH..].fill(None);
+        }
     }
 }
 
